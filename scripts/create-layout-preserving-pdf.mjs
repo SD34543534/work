@@ -2,7 +2,7 @@
 
 import { readFile, writeFile } from "node:fs/promises";
 import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const [inputPath, outputPath] = process.argv.slice(2);
@@ -29,6 +29,9 @@ const sourcePdf = await getDocument({
 const outputPdf = await PDFDocument.load(sourceForPdfLib);
 outputPdf.registerFontkit(fontkit);
 const chineseFont = await outputPdf.embedFont(fontBytes, { subset: true });
+const latinFont = await outputPdf.embedFont(StandardFonts.Helvetica);
+const chineseCharacters = new Set(chineseFont.getCharacterSet());
+const latinCharacters = new Set(latinFont.getCharacterSet());
 
 function groupTextItems(items) {
   const rows = [];
@@ -162,9 +165,36 @@ async function translateSegments(segments) {
   return Promise.all(segments.map((segment) => requestTranslation(segment.text)));
 }
 
-function fitFontSize(text, preferredSize, maxWidth) {
+function makeFontRuns(text) {
+  const runs = [];
+
+  for (const character of text) {
+    const codePoint = character.codePointAt(0);
+    const font = chineseCharacters.has(codePoint)
+      ? chineseFont
+      : latinCharacters.has(codePoint)
+        ? latinFont
+        : chineseFont;
+    const lastRun = runs.at(-1);
+    if (lastRun?.font === font) {
+      lastRun.text += character;
+    } else {
+      runs.push({ text: character, font });
+    }
+  }
+  return runs;
+}
+
+function widthOfRunsAtSize(runs, size) {
+  return runs.reduce(
+    (width, run) => width + run.font.widthOfTextAtSize(run.text, size),
+    0,
+  );
+}
+
+function fitFontSize(runs, preferredSize, maxWidth) {
   let size = Math.max(5, preferredSize);
-  while (size > 5 && chineseFont.widthOfTextAtSize(text, size) > maxWidth) {
+  while (size > 5 && widthOfRunsAtSize(runs, size) > maxWidth) {
     size -= 0.25;
   }
   return size;
@@ -190,15 +220,16 @@ for (let pageIndex = 0; pageIndex < sourcePdf.numPages; pageIndex += 1) {
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     const text = normalizeTranslation(translations[index] ?? segment.text);
+    const runs = makeFontRuns(text);
     const preferredSize = Math.max(5, segment.height * 0.88);
     const availableWidth = Math.max(
       segment.width + 3,
       Math.min(pageWidth - segment.x - 3, segment.width * 1.18),
     );
-    const fontSize = fitFontSize(text, preferredSize, availableWidth);
+    const fontSize = fitFontSize(runs, preferredSize, availableWidth);
     const textWidth = Math.min(
       availableWidth,
-      chineseFont.widthOfTextAtSize(text, fontSize),
+      widthOfRunsAtSize(runs, fontSize),
     );
     const backgroundWidth = Math.max(segment.width, textWidth) + 2;
     const backgroundHeight = Math.max(segment.height, fontSize) + 3;
@@ -210,17 +241,21 @@ for (let pageIndex = 0; pageIndex < sourcePdf.numPages; pageIndex += 1) {
       height: backgroundHeight,
       color: rgb(1, 1, 1),
     });
-    outputPage.drawText(text, {
-      x: segment.x,
-      y: segment.y,
-      size: fontSize,
-      font: chineseFont,
-      color:
-        segment.height >= 17
-          ? rgb(0.08, 0.32, 0.5)
-          : rgb(0.05, 0.05, 0.05),
-      maxWidth: availableWidth,
-    });
+    const color =
+      segment.height >= 17
+        ? rgb(0.08, 0.32, 0.5)
+        : rgb(0.05, 0.05, 0.05);
+    let textX = segment.x;
+    for (const run of runs) {
+      outputPage.drawText(run.text, {
+        x: textX,
+        y: segment.y,
+        size: fontSize,
+        font: run.font,
+        color,
+      });
+      textX += run.font.widthOfTextAtSize(run.text, fontSize);
+    }
   }
 
   sourcePage.cleanup();
