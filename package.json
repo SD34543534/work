@@ -1,0 +1,29 @@
+{
+  "name": "workspace",
+  "version": "1.0.0",
+  "description": "PG182 UltraScale FPGA 收发器向导中文译文",
+  "type": "module",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "translate:text": "node scripts/translate-document.mjs",
+    "translate:pdf": "node scripts/create-layout-preserving-pdf.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SD34543534/work.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/SD34543534/work/issues"
+  },
+  "homepage": "https://github.com/SD34543534/work#readme",
+  "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.1.200"
+  }
+}
